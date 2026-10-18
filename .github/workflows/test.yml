@@ -1,0 +1,60 @@
+name: Checkin CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+
+jobs:
+  test:
+    name: Run Automated Tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.22"
+          cache: true
+
+      - name: Build Service
+        run: |
+          go mod tidy
+          go build -o server .
+
+      - name: Start Service
+        run: |
+          ./server &
+          sleep 2
+
+      - name: 1. Test Valid Checkin (Randomized Data)
+        run: |
+          # 动态随机生成 10 位合法学号与姓名
+          RANDOM_ID="3122$((100000 + RANDOM % 900000))"
+          RANDOM_NAME="User_$RANDOM"
+          echo "Testing with random student_id: $RANDOM_ID, name: $RANDOM_NAME"
+          status=$(curl -s -o /dev/null -w "%{http_code}" -X POST http://localhost:8080/api/v1/checkin \
+            -H "Content-Type: application/json" \
+            -d "{\"name\":\"$RANDOM_NAME\",\"student_id\":\"$RANDOM_ID\"}")
+          echo "Valid Checkin Status: $status"
+          [ "$status" -eq 200 ]
+
+      - name: 2. Test Missing Field (Expect 400)
+        run: |
+          status=$(curl -s -o /dev/null -w "%{http_code}" -X POST http://localhost:8080/api/v1/checkin \
+            -H "Content-Type: application/json" \
+            -d '{"name":"测试同学"}')
+          echo "Missing Field Status: $status"
+          [ "$status" -eq 400 ]
+
+      - name: 3. Test Invalid StudentID Length (Expect 400)
+        run: |
+          # 传入非法长度（仅 3 位）的学号
+          status=$(curl -s -o /dev/null -w "%{http_code}" -X POST http://localhost:8080/api/v1/checkin \
+            -H "Content-Type: application/json" \
+            -d '{"name":"测试同学","student_id":"123"}')
+          echo "Invalid Length Status: $status"
+          [ "$status" -eq 400 ]
